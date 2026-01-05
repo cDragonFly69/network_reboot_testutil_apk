@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_horizontal"
+    tools:context=".MainActivity">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="重启后网络稳定性测试"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="30dp"/>
+
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="测试已停止"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#FF9800"
+        android:layout_marginBottom="15dp"/>
+
+    <TextView
+        android:id="@+id/tv_reboot_progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="重启进度: 0 / 0"
+        android:textSize="18sp"
+        android:visibility="gone"
+        android:layout_marginBottom="15dp"/>
+
+    <TextView
+        android:id="@+id/tv_total_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="网络检查总次数: 0"
+        android:textSize="22sp"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/tv_success_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="网络正常次数: 0"
+        android:textColor="#4CAF50"
+        android:textSize="22sp"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/tv_fail_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="网络异常次数: 0"
+        android:textColor="#F44336"
+        android:textSize="22sp"
+        android:layout_marginBottom="40dp"/>
+
+    <EditText
+        android:id="@+id/et_reboot_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:inputType="number"
+        android:hint="循环次数 (0或留空为无限)"
+        android:textSize="18sp"/>
+
+    <Button
+        android:id="@+id/btn_start_test"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="开始循环软重启"
+        android:textSize="18sp"
+        android:layout_marginBottom="20dp"/>
+
+    <Button
+        android:id="@+id/btn_stop_test"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="停止循环"
+        android:textSize="18sp"
+        android:layout_marginBottom="20dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btn_refresh_stats"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="10dp"
+            android:text="刷新数据"
+            android:textSize="18sp"/>
+
+        <Button
+            android:id="@+id/btn_reset_stats"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:text="重置计数器"
+            android:textSize="18sp"/>
+    </LinearLayout>
+
+</LinearLayout>

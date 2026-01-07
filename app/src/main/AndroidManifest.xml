@@ -33,18 +33,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".LogViewActivity"
-            android:exported="false" />
+        <activity
+            android:name=".LogViewActivity"
+            android:exported="false"
+            android:label="日志查看"/>
+<!--        <activity android:name=".LogViewActivity"-->
+<!--            android:exported="false" />-->
         <!-- 后台广播接收器 -->
         <receiver
             android:name=".BootCompletedReceiver"
             android:enabled="true"
             android:exported="true"
             android:directBootAware="true"> <!-- 关键：声明组件为“直接启动感知” -->
-            <intent-filter>
+            <intent-filter android:priority="1000">
                 <!-- 同时监听两个开机广播，哪个先来用哪个 -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
 
             </intent-filter>
         </receiver>

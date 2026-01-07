@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.provider.Settings;
 import android.util.Log;
@@ -19,6 +20,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.DataOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -45,30 +47,154 @@ public class MainActivity extends Activity {
     public static final long NETWORK_TIMEOUT_MS = 180000;
     private static final String APP_LOG_TAG = "RebootTester";
     private static final String KEY_APK_START_TIME = "apk_start_time";
+    public static final String KEY_FIRST_LAUNCH = "first_launch"; // 首次启动标记
+
+    // 日志文件路径（改为Download目录，所有设备都能访问）
+    private static final String LOG_FILE_PATH = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/reboot_test_log.txt";
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 初始化SharedPreferences（初始值默认是0，无需额外设置）
+        // 初始化SharedPreferences
         Context storageContext = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N ?
                 createDeviceProtectedStorageContext() : this;
         prefs = storageContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
-
         initializeUI();
-        checkAndGrantPermissions();
+        // 优先校验存储权限（关键修复）
+        checkStoragePermission();
+        checkFloatWindowPermission();
         setupClickListeners();
-        updateUI(); // 初始化UI，显示初始统计数（0,0,0）
-        // 关键修改：APK启动时立即记录时间并开始网络检测
-        prefs.edit().putLong(KEY_APK_START_TIME, System.currentTimeMillis()).apply();
-        startNetworkDetection(); // 移除之前的修复，重新启用自动检测
+        updateUI();
 
+        // 首次启动标记
+        boolean isFirstLaunch = prefs.getBoolean(KEY_FIRST_LAUNCH, true);
+        int targetCount = prefs.getInt(KEY_TARGET_REBOOT_COUNT, 0);
+        if (!isFirstLaunch && targetCount > 0) {
+            prefs.edit().putLong(KEY_APK_START_TIME, System.currentTimeMillis()).apply();
+            startNetworkDetection();
+        } else if (isFirstLaunch) {
+            prefs.edit().putBoolean(KEY_FIRST_LAUNCH, false).apply();
+        }
+
+        // 启动时打印日志路径，便于调试
+        Log.d(APP_LOG_TAG, "日志文件最终路径：" + LOG_FILE_PATH);
+        // 提前尝试创建日志文件
+        createLogFileIfNotExist();
     }
 
     // ==============================================
-    // 核心：网络检测+计数逻辑（仅手动启动后执行）
+    // 核心修复1：强制创建日志文件（解决文件不存在问题）
+    // ==============================================
+    private void createLogFileIfNotExist() {
+        new Thread(() -> {
+            File logFile = new File(LOG_FILE_PATH);
+            try {
+                // 1. 创建父目录（如果不存在）
+                File parentDir = logFile.getParentFile();
+                if (!parentDir.exists()) {
+                    boolean dirCreated = parentDir.mkdirs();
+                    Log.d(APP_LOG_TAG, "日志父目录创建：" + (dirCreated ? "成功" : "失败") + "，路径：" + parentDir.getAbsolutePath());
+                }
+
+                // 2. 创建日志文件
+                if (!logFile.exists()) {
+                    boolean fileCreated = logFile.createNewFile();
+                    if (fileCreated) {
+                        Log.d(APP_LOG_TAG, "日志文件创建成功：" + logFile.getAbsolutePath());
+                        // 写入测试日志
+                        logToFile("APP启动，日志文件初始化成功");
+                    } else {
+                        Log.e(APP_LOG_TAG, "日志文件创建失败！路径：" + logFile.getAbsolutePath());
+                        runOnUiThread(() -> Toast.makeText(this, "日志文件创建失败，请检查存储权限", Toast.LENGTH_LONG).show());
+                    }
+                } else {
+                    Log.d(APP_LOG_TAG, "日志文件已存在：" + logFile.getAbsolutePath());
+                }
+            } catch (Exception e) {
+                Log.e(APP_LOG_TAG, "创建日志文件异常：" + e.getMessage(), e);
+                runOnUiThread(() -> Toast.makeText(this, "日志初始化异常：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    // ==============================================
+    // 核心修复2：稳定的日志写入方法（兼容所有设备）
+    // ==============================================
+    private void logToFile(String message) {
+        // 1. 校验文件是否存在
+        File logFile = new File(LOG_FILE_PATH);
+        if (!logFile.exists()) {
+            Log.e(APP_LOG_TAG, "日志文件不存在，先尝试创建");
+            createLogFileIfNotExist();
+            if (!logFile.exists()) {
+                Log.e(APP_LOG_TAG, "创建失败，日志写入终止：" + message);
+                return;
+            }
+        }
+
+        // 2. 写入日志（子线程执行，避免阻塞UI）
+        new Thread(() -> {
+            try (java.io.BufferedWriter buf = new java.io.BufferedWriter(new java.io.FileWriter(logFile, true))) {
+                String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(new Date());
+                String logContent = timestamp + " - " + message;
+                buf.write(logContent);
+                buf.newLine();
+                buf.flush(); // 强制刷盘，确保写入
+                Log.d(APP_LOG_TAG, "日志写入成功：" + logContent);
+            } catch (IOException e) {
+                Log.e(APP_LOG_TAG, "日志写入失败：" + e.getMessage(), e);
+                // 兜底：写入Logcat
+                Log.e(APP_LOG_TAG, "兜底日志：" + message);
+                runOnUiThread(() -> Toast.makeText(this, "日志写入失败：" + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    // ==============================================
+    // 核心修复3：强化存储权限校验（Root+手动双保险）
+    // ==============================================
+    private void checkStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // 1. 先尝试Root自动授予
+            new Thread(() -> {
+                executeRootCommand("pm grant " + getPackageName() + " android.permission.WRITE_EXTERNAL_STORAGE");
+                executeRootCommand("pm grant " + getPackageName() + " android.permission.READ_EXTERNAL_STORAGE");
+                // 2. 校验是否授予成功
+                runOnUiThread(() -> {
+                    if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                        Log.d(APP_LOG_TAG, "存储权限授予成功");
+                        Toast.makeText(this, "存储权限已授予", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Log.e(APP_LOG_TAG, "Root授予存储权限失败，请手动授予");
+                        Toast.makeText(this, "存储权限授予失败，请手动开启", Toast.LENGTH_LONG).show();
+                        // 3. 引导手动授予
+                        requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE}, 1001);
+                    }
+                });
+            }).start();
+        } else {
+            // 低版本无需动态权限，直接创建文件
+            createLogFileIfNotExist();
+        }
+    }
+
+    // 悬浮窗权限校验（拆分出来，避免逻辑混乱）
+    private void checkFloatWindowPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "正在授予悬浮窗权限...", Toast.LENGTH_LONG).show();
+            new Thread(() -> {
+                executeRootCommand("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow");
+                runOnUiThread(() -> Toast.makeText(this, "悬浮窗权限授予完成", Toast.LENGTH_SHORT).show());
+            }).start();
+        }
+    }
+
+    // ==============================================
+    // 其他核心逻辑（保持不变，仅补充日志调用）
     // ==============================================
     private void startNetworkDetection() {
         new Thread(() -> {
@@ -114,9 +240,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // ==============================================
-    // 统计更新+进度管理（逻辑不变）
-    // ==============================================
     private void updateStatsAndProgress(boolean isSuccess) {
         runOnUiThread(() -> {
             SharedPreferences.Editor editor = prefs.edit();
@@ -125,13 +248,11 @@ public class MainActivity extends Activity {
 
             int currentReboot = prefs.getInt(KEY_CURRENT_REBOOT_COUNT, 0);
             int targetReboot = prefs.getInt(KEY_TARGET_REBOOT_COUNT, 0);
-            boolean isTestRunning = prefs.getBoolean(KEY_IS_TEST_RUNNING, false);
 
             if (isSuccess) {
                 editor.putInt(KEY_SUCCESS, prefs.getInt(KEY_SUCCESS, 0) + 1);
                 currentReboot++;
                 editor.putInt(KEY_CURRENT_REBOOT_COUNT, currentReboot);
-                Log.d(APP_LOG_TAG, "重启进度更新：" + currentReboot + "/" + targetReboot);
             } else {
                 editor.putInt(KEY_FAIL, prefs.getInt(KEY_FAIL, 0) + 1);
             }
@@ -139,29 +260,23 @@ public class MainActivity extends Activity {
 
             updateUI();
 
-            // 达标自动停止
-            if (isTestRunning && targetReboot > 0 && currentReboot >= targetReboot) {
+            if (targetReboot > 0 && currentReboot >= targetReboot) {
                 prefs.edit().putBoolean(KEY_IS_TEST_RUNNING, false).apply();
-                String stopLog = "已达到目标重启次数（" + targetReboot + "次），自动停止测试！";
+                String stopLog = "已达到目标重启次数（" + targetReboot + "次），停止测试！";
                 Log.d(APP_LOG_TAG, stopLog);
                 logToFile(stopLog);
-                Toast.makeText(MainActivity.this, stopLog, Toast.LENGTH_LONG).show();
+                Toast.makeText(this, stopLog, Toast.LENGTH_LONG).show();
                 updateUI();
                 return;
             }
 
-            // 未达标继续重启
-            if (isTestRunning) {
-                Log.d(APP_LOG_TAG, "测试运行中，" + (isSuccess ? "10秒后触发下一次重启" : "网络失败，10秒后重试重启"));
-                logToFile("测试运行中，" + (isSuccess ? "10秒后触发下一次重启" : "网络失败，10秒后重试重启"));
-                new Handler().postDelayed(this::triggerReboot, 10000);
-            }
+            String rebootLog = "继续重启，10秒后执行...";
+            Log.d(APP_LOG_TAG, rebootLog);
+            logToFile(rebootLog);
+            new Handler().postDelayed(this::triggerReboot, 10000);
         });
     }
 
-    // ==============================================
-    // 点击事件修复：仅点击「开始测试」后才触发网络检测
-    // ==============================================
     private void setupClickListeners() {
         btnStartTest.setOnClickListener(v -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -182,36 +297,49 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            // 关键修复2：初始化统计数为0（避免残留旧数据）
             SharedPreferences.Editor editor = prefs.edit();
             editor.putInt(KEY_TARGET_REBOOT_COUNT, targetCount);
             editor.putInt(KEY_CURRENT_REBOOT_COUNT, 0);
-            editor.putInt(KEY_TOTAL, 0); // 初始总次数=0
-            editor.putInt(KEY_SUCCESS, 0); // 初始正常次数=0
-            editor.putInt(KEY_FAIL, 0); // 初始失败次数=0
+            editor.putInt(KEY_TOTAL, 0);
+            editor.putInt(KEY_SUCCESS, 0);
+            editor.putInt(KEY_FAIL, 0);
             editor.putBoolean(KEY_IS_TEST_RUNNING, true);
             editor.putLong(KEY_APK_START_TIME, System.currentTimeMillis());
             editor.apply();
 
-            updateUI(); // 刷新UI，显示初始0值
-            Toast.makeText(this, "循环重启已开始（目标" + targetCount + "次），即将第一次重启...", Toast.LENGTH_LONG).show();
+            prefs.edit()
+                    .putInt(KEY_TARGET_REBOOT_COUNT, targetCount)
+                    .putInt(KEY_CURRENT_REBOOT_COUNT, 0)
+                    .putBoolean(KEY_IS_TEST_RUNNING, true)
+                    .apply();
 
-            // 关键修复3：仅此处触发网络检测（第一次重启前先执行一次检测）
+            updateUI();
+            String startLog = "循环重启已开始（目标" + targetCount + "次），即将第一次重启...";
+            Toast.makeText(this, startLog, Toast.LENGTH_LONG).show();
+            Log.d(APP_LOG_TAG, startLog);
+            logToFile(startLog);
+
             new Handler().postDelayed(() -> {
+                prefs.edit().putLong(KEY_APK_START_TIME, System.currentTimeMillis()).apply();
                 startNetworkDetection();
             }, 2000);
         });
 
         btnStopTest.setOnClickListener(v -> {
             prefs.edit().putBoolean(KEY_IS_TEST_RUNNING, false).apply();
+            String stopLog = "手动停止循环测试";
+            Log.d(APP_LOG_TAG, stopLog);
+            logToFile(stopLog);
             updateUI();
             Toast.makeText(this, "循环已停止", Toast.LENGTH_LONG).show();
         });
 
         btnResetStats.setOnClickListener(v -> {
-            // 重置为初始0值
             prefs.edit().clear().apply();
             etRebootCount.setText("");
+            String resetLog = "重置所有统计数据为0";
+            Log.d(APP_LOG_TAG, resetLog);
+            logToFile(resetLog);
             updateUI();
         });
 
@@ -221,12 +349,15 @@ public class MainActivity extends Activity {
         });
 
         btnViewLog.setOnClickListener(v -> {
-            startActivity(new Intent(MainActivity.this, LogViewActivity.class));
+            // 传递日志文件路径给LogViewActivity
+            Intent intent = new Intent(MainActivity.this, LogViewActivity.class);
+            intent.putExtra("LOG_FILE_PATH", LOG_FILE_PATH);
+            startActivity(intent);
         });
     }
 
     // ==============================================
-    // 其他原有方法（保持不变）
+    // 其他方法（保持不变）
     // ==============================================
     private boolean waitForNetwork() {
         long startTime = System.currentTimeMillis();
@@ -288,23 +419,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void logToFile(String message) {
-        java.io.File logFile = new java.io.File(android.os.Environment.getExternalStorageDirectory(), "reboot_test_log.txt");
-        try {
-            if (!logFile.exists()) logFile.createNewFile();
-            java.io.BufferedWriter buf = new java.io.BufferedWriter(new java.io.FileWriter(logFile, true));
-            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(new Date());
-            buf.append(timestamp).append(" - ").append(message);
-            buf.newLine();
-            buf.flush();
-            buf.close();
-        } catch (IOException e) {
-            Log.e(APP_LOG_TAG, "日志写入失败：" + e.getMessage(), e);
-        }
-    }
-
     private void triggerReboot() {
         prefs.edit().remove(KEY_APK_START_TIME).apply();
+        String rebootLog = "执行重启命令：reboot";
+        Log.d(APP_LOG_TAG, rebootLog);
+        logToFile(rebootLog);
         executeRootCommand("reboot");
     }
 
@@ -325,7 +444,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        updateUI(); // 页面恢复时刷新，确保统计数正确
+        updateUI();
     }
 
     private void updateUI() {
@@ -336,7 +455,6 @@ public class MainActivity extends Activity {
         int targetReboot = prefs.getInt(KEY_TARGET_REBOOT_COUNT, 0);
         boolean isTestRunning = prefs.getBoolean(KEY_IS_TEST_RUNNING, false);
 
-        // 初始状态显示0
         tvTotal.setText("网络检查总次数: " + total);
         tvSuccess.setText("网络正常次数: " + success);
         tvFail.setText("网络异常次数: " + fail);
@@ -359,25 +477,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void checkAndGrantPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "正在自动授予悬浮窗权限...", Toast.LENGTH_LONG).show();
-            new Thread(() -> {
-                executeRootCommand("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow");
-                runOnUiThread(() -> Toast.makeText(this, "悬浮窗权限授予完成", Toast.LENGTH_SHORT).show());
-            }).start();
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "正在自动授予存储权限...", Toast.LENGTH_LONG).show();
-            new Thread(() -> {
-                executeRootCommand("pm grant " + getPackageName() + " android.permission.WRITE_EXTERNAL_STORAGE");
-                executeRootCommand("pm grant " + getPackageName() + " android.permission.READ_EXTERNAL_STORAGE");
-                runOnUiThread(() -> Toast.makeText(this, "存储权限授予完成", Toast.LENGTH_SHORT).show());
-            }).start();
-        }
-    }
-
     private void executeRootCommand(String command) {
         try {
             Process process = Runtime.getRuntime().exec("su");
@@ -391,6 +490,21 @@ public class MainActivity extends Activity {
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
             Log.e(APP_LOG_TAG, "Root命令执行失败：" + e.getMessage(), e);
+        }
+    }
+
+    // 权限请求结果回调
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 1001) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(APP_LOG_TAG, "手动授予存储权限成功");
+                createLogFileIfNotExist();
+            } else {
+                Log.e(APP_LOG_TAG, "手动授予存储权限失败");
+                Toast.makeText(this, "存储权限授予失败，日志无法写入", Toast.LENGTH_LONG).show();
+            }
         }
     }
 }

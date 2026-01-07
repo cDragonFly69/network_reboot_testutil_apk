@@ -33,7 +33,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
+        <activity android:name=".LogViewActivity"
+            android:exported="false" />
         <!-- 后台广播接收器 -->
         <receiver
             android:name=".BootCompletedReceiver"
@@ -44,6 +45,7 @@
                 <!-- 同时监听两个开机广播，哪个先来用哪个 -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+
             </intent-filter>
         </receiver>
 

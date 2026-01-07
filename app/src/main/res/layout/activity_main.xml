@@ -104,9 +104,18 @@
             android:id="@+id/btn_reset_stats"
             android:layout_width="0dp"
             android:layout_height="60dp"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:text="重置计数器"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/btn_cat_logs"
+            android:layout_width="10dp"
+            android:layout_height="60dp"
             android:layout_weight="1"
             android:layout_marginStart="10dp"
-            android:text="重置计数器"
+            android:text="查看日志"
             android:textSize="18sp"/>
     </LinearLayout>
 
